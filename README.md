@@ -1,7 +1,7 @@
 
 ---
 
-# ![Graphene Logo](http://graphene-python.org/favicon.png) Graphene-Django-Subscriptions [![PyPI version](https://badge.fury.io/py/graphene-django-subscriptions.svg)](https://badge.fury.io/py/graphene-django-subscriptions)
+# Graphene-Django-Subscriptions [![PyPI version](https://badge.fury.io/py/graphene-django-subscriptions.svg)](https://badge.fury.io/py/graphene-django-subscriptions)
 
 
 This package adds support to Subscription's requests and its integration with websockets using Channels package.
