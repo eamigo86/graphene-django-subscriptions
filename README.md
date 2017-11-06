@@ -5,6 +5,8 @@
 
 
 This package adds support to Subscription's requests and its integration with websockets using Channels package.
+You can use this mini web tool to test websocket notifications. It's intuitive and simple:
+[graphene-django-subscriptions.tool.zip](https://github.com/eamigo86/graphene-django-subscriptions/files/1446866/graphene-django-subscriptions.tool.zip)
 
 ## Installation
 
