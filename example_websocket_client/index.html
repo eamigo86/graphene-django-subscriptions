@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Tool for websockets subscritpion test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="" />
+    <meta name="author" content="Ing. Ernesto Pérez Amigo" />
+    <!-- Le styles -->
+    <link href="assets/css/bootstrap.css" rel="stylesheet" />
+    <link href="assets/css/bootstrap-responsive.css" rel="stylesheet" />
+    <link href="assets/css/application.css" rel="stylesheet" />
+    <link href="assets/css/prettify.css" rel="stylesheet" />
+
+    <link rel="shortcut icon" href="assets/img/favicon.png" />
+</head>
+
+<body>
+    <header class="jumbotron subhead">
+        <div class="container container-narrow">
+            <div class="row">
+                <div class="span8">
+                    <!-- BEGIN LOGO -->
+                    <img src="assets/img/favicon.png" alt="Logo" id="logo"> Tool for test graphene-django-subscriptions </img>
+                </div>
+            </div>
+        </div>
+    </header>
+    <table class="table table-bordered table-striped">
+        <tbody>
+            <tr>
+                <td width="100%">
+                    <ul class="menu">
+                        <li>
+                            <form class="form-inline" id="address_form">
+                                <div class="row" style="margin-left: 0.5em;">
+                                    <label class="input"> Websocket server: </label>
+                                    <label>
+                                          <input type="text" class="input-large" placeholder="example.com:8080" value="localhost:8000" id="host_input" name="host">
+                                    </label>
+                                    <label class="input"> / </label>
+                                    <label>
+                                        <input required type="text" class="input-medium" placeholder="some_websocket_route" id="route_input" name="route">
+                                    </label>
+                                    <button type="submit" style="margin-top: 4px;" class="btn btn-success" id="form_submit">Connect !!!</button>
+                                    <button class="btn btn-danger" type="button" id="clear_output">
+                                        Clear Output
+                                    </button>
+                                </div>
+                                <div class="row" style="margin-left: 0.5em;">
+                                    <label>
+                                        Secure connexion:
+                                        <input required type="checkbox" class="input-medium" id="is_secure_connection" name="secure_connection">
+                                    </label>
+                                </div>
+                            </form>
+                        </li>
+                        <li>
+                            <h4><b>Output:</b></h4>
+                        </li>
+                        <li>
+                            <div id="output"></div>
+                        </li>
+                    </ul>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <script src="assets/js/jquery.min.js"></script>
+    <script src="assets/js/bootstrap.js"></script>
+    <script src="assets/js/prettify.js"></script>
+    <script src="assets/js/application.js"></script>
+</body>
+
+
+</html>

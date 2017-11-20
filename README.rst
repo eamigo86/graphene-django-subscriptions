@@ -2,7 +2,8 @@
 Graphene-Django-Subscriptions
 =============================
 
-This package adds support to Subscription's requests and its integration with websockets using Channels package.
+This package adds support to Subscription's requests and its integration with websockets using Channels package. You can test websockets notifications with this mini web tool. It's intuitive and simple: `websocket_example_client <https://github.com/eamigo86/graphene-django-subscriptions/tree/master/example_websocket_client>`_
+
 
 Installation:
 -------------
@@ -84,7 +85,7 @@ Add the app's schema into your project root schema:
             description = 'The project root query definition'
 
 
-    class RootSubscription(custom.app.route.graphql.schema.Mutation, graphene.ObjectType):
+    class RootMutation(custom.app.route.graphql.schema.Mutation, graphene.ObjectType):
         class Meta:
             description = 'The project root mutation definition'
 
@@ -113,7 +114,7 @@ We define app routing, as if they were app urls:
 .. code:: python
 
     # app/routing.py
-    from graphene_django_extras.subscriptions import GraphqlAPIDemultiplexer
+    from graphene_django_subscriptions.subscriptions import GraphqlAPIDemultiplexer
     from channels.routing import route_class
     from .graphql.subscriptions import UserSubscription, GroupSubscription
 
