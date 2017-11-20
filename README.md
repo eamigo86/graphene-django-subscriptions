@@ -79,7 +79,7 @@ class RootQuery(custom.app.route.graphql.schema.Query, graphene.ObjectType):
         description = 'The project root query definition'
 
 
-class RootSubscription(custom.app.route.graphql.schema.Mutation, graphene.ObjectType):
+class RootMutation(custom.app.route.graphql.schema.Mutation, graphene.ObjectType):
     class Meta:
         description = 'The project root mutation definition'
 
@@ -102,7 +102,7 @@ We define app routing, as if they were app urls:
 
 ```python
 # app/routing.py
-from graphene_django_extras.subscriptions import GraphqlAPIDemultiplexer
+from graphene_django_subscriptions.subscriptions import GraphqlAPIDemultiplexer
 from channels.routing import route_class
 from .graphql.subscriptions import UserSubscription, GroupSubscription
 
