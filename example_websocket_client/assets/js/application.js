@@ -111,11 +111,13 @@
     
     $("#form_submit").click(function(e){
         e.preventDefault();
-        var secure_connexion = $("#is_secure_connection").i;
-        console.log(secure_connexion);
 
         if ($(this).hasClass( "btn-success" )){
-            createWebSocket.init("ws://" + $("#host_input").val() + "/" + $("#route_input").val());
+            var secure_connexion = $("#is_secure_connection").is(':checked');
+            console.log(secure_connexion);
+            var protocol = secure_connexion ? "wss" : "ws";
+
+            createWebSocket.init(protocol + "://" + $("#host_input").val() + "/" + $("#route_input").val());
 
             $(this).removeClass( "btn-success" );
             $(this).addClass( "btn-danger" );
