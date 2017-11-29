@@ -8,6 +8,8 @@ This package adds support to Subscription's requests and its integration with we
 You can use this mini web tool to test websocket notifications. It's intuitive and simple:
 [websocket_example_client](https://github.com/eamigo86/graphene-django-subscriptions/tree/master/example_websocket_client)
 
+![example](https://github.com/eamigo86/graphene-django-subscriptions/blob/master/example_websocket_client/subscription_example_gif.gif)
+
 ## Installation
 
 For installing graphene-django-subscriptions, just run this command in your shell:
