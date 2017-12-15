@@ -6,7 +6,7 @@ from channels import Group
 from graphene import Field, Argument, Enum, String, ObjectType, Boolean, List, ID
 from graphene.types.base import BaseOptions
 from graphene.utils.str_converters import to_snake_case
-from graphene_django_extras.mutation import DjangoSerializerMutation
+from rest_framework.serializers import Serializer
 from six import string_types
 
 from .bindings import SubscriptionResourceBinding
@@ -32,7 +32,6 @@ class SubscriptionOptions(BaseOptions):
     stream = None
     serializer_class = None
     queryset = None
-    mutation_class = None
 
 
 class Subscription(ObjectType):
@@ -49,37 +48,36 @@ class Subscription(ObjectType):
         abstract = True
 
     @classmethod
-    def __init_subclass_with_meta__(cls, mutation_class=None, stream=None, queryset=None, description='', **options):
+    def __init_subclass_with_meta__(cls, serializer_class=None, stream=None, queryset=None, description='', **options):
 
-        assert issubclass(mutation_class, DjangoSerializerMutation), \
-            'You need to pass a valid DjangoSerializerMutation subclass in {}.Meta, received "mutation_class = {}"'\
-            .format(cls.__name__, mutation_class)
+        assert issubclass(serializer_class, Serializer), \
+            'You need to pass a valid Serializer subclass in {}.Meta, received "serializer_class = {}"'\
+            .format(cls.__name__, serializer_class)
 
         assert isinstance(stream, string_types), \
             'You need to pass a valid string stream name in {}.Meta, received "{}"'.format(
                 cls.__name__, stream)
 
         if queryset:
-            assert mutation_class._meta.model == queryset.model, \
-                'The queryset model must correspond with the mutation_class model passed on Meta class, received ' \
-                '"{}", expected "{}"'.format(queryset.model.__name__, mutation_class._meta.model.__name__)
+            assert serializer_class.Meta.model == queryset.model, \
+                'The queryset model must correspond with the serializer_class model passed on Meta class, received ' \
+                '"{}", expected "{}"'.format(queryset.model.__name__, serializer_class.Meta.model.__name__)
 
-        description = description or 'Subscription Type for {} model'.format(mutation_class._meta.model.__name__)
+        description = description or 'Subscription Type for {} model'.format(serializer_class.Meta.model.__name__)
 
         _meta = SubscriptionOptions(cls)
 
         _meta.output = cls
         _meta.fields = None
-        _meta.model = mutation_class._meta.model
+        _meta.model = serializer_class.Meta.model
         _meta.stream = stream
-        _meta.serializer_class = copy.deepcopy(mutation_class._meta.serializer_class)
-        _meta.mutation_class = mutation_class
+        _meta.serializer_class = serializer_class
 
         serializer_fields = [(to_snake_case(field.strip('_')).upper(), to_snake_case(field))
                              for field in _meta.serializer_class.Meta.fields]
-        model_fields_enum = Enum('{}Fields'.format(mutation_class._meta.model.__name__), serializer_fields,
+        model_fields_enum = Enum('{}Fields'.format(_meta.model.__name__), serializer_fields,
                                  description='Desired {} fields in subscription\'s  notification.'
-                                 .format(mutation_class._meta.model.__name__))
+                                 .format(_meta.model.__name__))
 
         arguments = {
             'channel_id': Argument(String, required=True, description='Websocket\'s channel connection identification'),

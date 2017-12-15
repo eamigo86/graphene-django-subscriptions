@@ -21,7 +21,7 @@
             output.append(message);
             count++;
 
-            while (output.height() > 520) {
+            while (output.height() > 600 && output.children().length > 1) {
                 output.children()[0].remove();
             }
         };
@@ -55,14 +55,17 @@
             };
 
             connection.onerror = function(error) {
+                console.log('error')
                 processOutput("<p class=\"text-error\">" + count + "- Error detected: " + ready_states[connection.readyState] + " (address: " + address + ")</p>");
             };
 
             connection.onmessage = function(e) {
+                console.log(e)
                 processOutput("<p class=\"text-success\">" + count + "- <b>RECEIVE:</b> " + e.data + "</p>");
             };
 
             connection.onclose = function() {
+                console.log('cerrado')
 
                 if (connected_flag === true){
 
@@ -114,7 +117,6 @@
 
         if ($(this).hasClass( "btn-success" )){
             var secure_connexion = $("#is_secure_connection").is(':checked');
-            console.log(secure_connexion);
             var protocol = secure_connexion ? "wss" : "ws";
 
             createWebSocket.init(protocol + "://" + $("#host_input").val() + "/" + $("#route_input").val());

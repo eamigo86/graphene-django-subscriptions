@@ -37,19 +37,19 @@ You must to have defined a DjangoSerializerMutation class for each model that yo
 # app/graphql/subscriptions.py
 import graphene
 from graphene_django_extras.subscription import Subscription
-from .mutations import UserMutation, GroupMutation
+from .serializers import UserSerializer, GroupSerializer
 
 
 class UserSubscription(Subscription):
     class Meta:
-        mutation_class = UserMutation
+        serializer_class = UserSerializer
         stream = 'users'
         description = 'User Subscription'
 
 
 class GroupSubscription(Subscription):
     class Meta:
-        mutation_class = GroupMutation
+        serializer_class = GroupSerializer
         stream = 'groups'
         description = 'Group Subscription'
 
@@ -235,6 +235,10 @@ connection and resend the graphql's subscription request with the new websocket 
 
 
 ## Change Log:
+
+#### v0.0.2:
+    1. Changed mutation_class dependence on Subscription Meta class definition to serializer_class.
+    2. Fixed some minor bugs.
 
 #### v0.0.1:
     1. First commit.
