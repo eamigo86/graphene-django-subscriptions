@@ -250,7 +250,8 @@ Change Log:
 *******
 v0.0.2:
 *******
-1. Changed mutation_class dependence on Subscription Meta class definition to serializer_class.
+1. Changed mutation_class dependence on Subscription Meta class definition to serializer_class to get better
+integration.
 2. Fixed some minor bugs.
 
 *******
