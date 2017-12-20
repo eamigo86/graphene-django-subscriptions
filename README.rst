@@ -33,7 +33,7 @@ This first approach to add Graphql subscriptions support  with Channels in graph
 1- Defining custom Subscriptions classes:
 *****************************************
 
-You must to have defined a DjangoSerializerMutation class for each model that you want to define a Subscription class:
+You must to have defined a Serializer class for each model that you want to define a Subscription class:
 
 .. code:: python
 
