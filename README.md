@@ -236,6 +236,10 @@ connection and resend the graphql's subscription request with the new websocket 
 
 ## Change Log:
 
+#### v0.0.3:
+1. Added **depromise_subscription** middleware to allow use subscriptions on graphene-django>=2.0.
+2. Updated setup dependence to graphene-django-extras>=0.3.0.
+
 #### v0.0.2:
     1. Changed mutation_class dependence on Subscription Meta class definition to serializer_class to get better
     integration.

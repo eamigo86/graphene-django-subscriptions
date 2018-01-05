@@ -3,10 +3,11 @@ from graphene import get_version
 
 from .consumers import GraphqlAPIDemultiplexer
 from .subscription import Subscription
+from .middleware import depromise_subscription
 
 __author__ = 'Ernesto'
 
-VERSION = (0, 0, 2, 'final', '')
+VERSION = (0, 0, 3, 'final', '')
 
 __version__ = get_version(VERSION)
 
@@ -14,5 +15,6 @@ __all__ = (
     '__version__',
 
     'Subscription',
-    'GraphqlAPIDemultiplexer'
+    'GraphqlAPIDemultiplexer',
+    'depromise_subscription'
 )

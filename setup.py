@@ -53,10 +53,7 @@ setup(
 
     packages=get_packages(),
     install_requires=[
-        'graphql-core==2.0.dev20171009101843',
-        'graphene==2.0.dev20170802065539',
-        'graphene-django==2.0.dev2017083101',
-        'djangorestframework==3.6.4',
+        'graphene-django-extras>=0.3.0',
         'channels-api>=0.4.0'
     ],
     include_package_data=True,
