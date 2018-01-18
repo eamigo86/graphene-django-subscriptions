@@ -2,6 +2,7 @@
 import copy
 import json
 
+import rx
 from channels import Group
 from graphene import Field, Argument, Enum, String, ObjectType, Boolean, List, ID
 from graphene.types.base import BaseOptions
@@ -149,7 +150,7 @@ class Subscription(ObjectType):
         except Exception as e:
             response.update(dict(ok=False, error=e.__str__()))
 
-        return cls(**response)
+        return rx.Observable.from_([cls(**response)])
 
     @classmethod
     def get_binding(cls):

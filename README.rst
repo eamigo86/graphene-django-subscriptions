@@ -169,6 +169,22 @@ You should put into your INSTALLED_APPS the channels and channels_api modules an
     }
     ...
 
+You must add **'graphene_django_subscriptions.depromise_subscription'** middleware to your GRAPHENE dict
+config on your settings.py:
+
+.. code:: python
+
+    # settings.py
+    ...
+    GRAPHENE = {
+        'SCHEMA_INDENT': 4,
+        'MIDDLEWARE': [
+            # Others middleware
+            'graphene_django_subscriptions.depromise_subscription,
+        ]
+    }
+    ...
+
 
 ***************************
 3- Subscription's examples:
@@ -246,6 +262,11 @@ For unsubscribe you must send a graphql request like this:
 
 Change Log:
 -----------
+
+*******
+v0.0.4:
+*******
+1. Fixed minor bug on *subscription_resolver* function.
 
 *******
 v0.0.3:

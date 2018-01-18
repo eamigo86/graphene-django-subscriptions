@@ -161,6 +161,21 @@ CHANNEL_LAYERS = {
 ...
 ```
 
+You must add **'graphene_django_subscriptions.depromise_subscription'** middleware to your GRAPHENE dict
+config on your settings.py:
+
+```python
+# settings.py
+
+GRAPHENE = {
+    'SCHEMA_INDENT': 4,
+    'MIDDLEWARE': [
+        # Others middlewares
+        'graphene_django_subscriptions.depromise_subscription,
+    ]
+}
+```
+
 #### 3- Subscription's examples:
 
 In your WEB client you must define websocket connection to: *'ws://host:port/custom_websocket_path'*.
@@ -236,9 +251,16 @@ connection and resend the graphql's subscription request with the new websocket 
 
 ## Change Log:
 
+#### v0.0.4:
+    1. Fixed minor bug on *subscription_resolver* function.
+
 #### v0.0.3:
-1. Added **depromise_subscription** middleware to allow use subscriptions on graphene-django>=2.0.
-2. Updated setup dependence to graphene-django-extras>=0.3.0.
+    1. Added **depromise_subscription** middleware to allow use subscriptions on graphene-django>=2.0.
+    2. Updated setup dependence to graphene-django-extras>=0.3.0.
+
+#### v0.0.3:
+    1. Added **depromise_subscription** middleware to allow use subscriptions on graphene-django>=2.0.
+    2. Updated setup dependence to graphene-django-extras>=0.3.0.
 
 #### v0.0.2:
     1. Changed mutation_class dependence on Subscription Meta class definition to serializer_class to get better
