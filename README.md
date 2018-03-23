@@ -36,7 +36,7 @@ You must to have defined a Serializer class for each model that you want to defi
 ```python
 # app/graphql/subscriptions.py
 import graphene
-from graphene_django_extras.subscription import Subscription
+from graphene_django_subscriptions.subscription import Subscription
 from .serializers import UserSerializer, GroupSerializer
 
 
