@@ -104,7 +104,7 @@ We define app routing, as if they were app urls:
 
 ```python
 # app/routing.py
-from graphene_django_subscriptions.subscriptions import GraphqlAPIDemultiplexer
+from graphene_django_subscriptions.subscription import GraphqlAPIDemultiplexer
 from channels.routing import route_class
 from .graphql.subscriptions import UserSubscription, GroupSubscription
 
