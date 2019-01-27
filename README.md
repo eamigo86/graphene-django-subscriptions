@@ -65,7 +65,7 @@ from .subscriptions import UserSubscription, GroupSubscription
 
 class Subscriptions(graphene.ObjectType):
     user_subscription = UserSubscription.Field()
-    GroupSubscription = PersonSubscription.Field()
+    group_subscription = GroupSubscription.Field()
 ```
 
 Add the app's schema into your project root schema:
@@ -73,20 +73,20 @@ Add the app's schema into your project root schema:
 ```python
 # schema.py
 import graphene
-import custom.app.route.graphql.schema
+import app.route.graphql.schema
 
 
-class RootQuery(custom.app.route.graphql.schema.Query, graphene.ObjectType):
+class RootQuery(app.route.graphql.schema.Query, graphene.ObjectType):
     class Meta:
         description = 'The project root query definition'
 
 
-class RootMutation(custom.app.route.graphql.schema.Mutation, graphene.ObjectType):
+class RootMutation(app.route.graphql.schema.Mutation, graphene.ObjectType):
     class Meta:
         description = 'The project root mutation definition'
 
 
-class RootSubscription(custom.app.route.graphql.schema.Subscriptions, graphene.ObjectType):
+class RootSubscription(app.route.graphql.schema.Subscriptions, graphene.ObjectType):
     class Meta:
         description = 'The project root subscription definition'
 
@@ -98,9 +98,9 @@ schema = graphene.Schema(
 )
 ```
 
-#### 2- Defining Channels settings and custom routing config ( *For more information see Channels documentation* ):
+#### 2- Defining Channels settings and custom routing config (*For more information see Channels documentation*):
 
-We define app routing, as if they were app urls:
+We define app routing, as if it were traditional app urls:
 
 ```python
 # app/routing.py
@@ -129,7 +129,7 @@ from channels import include
 
 
 project_routing = [
-    include("custom.app.folder.routing.app_routing", path=r"^/custom_websocket_path"),
+    include("app.routing.app_routing", path=r"^/custom_websocket_path"),
 ]
 
 ```
@@ -149,7 +149,7 @@ INSTALLED_APPS = (
   'channels',
   'channels_api',
 
-  'custom_app'
+  'app'
 )
 
 CHANNEL_LAYERS = {
@@ -187,7 +187,7 @@ The graphql's subscription request accept five possible parameters:
   2.  **action**: Action to which you wish to subscribe: create, update, delete or all_actions. (*required*)
   3.  **channelId**: Identification of the connection by websocket. (*required*)
   4.  **id**: Object's ID field value that you wish to subscribe to. (*optional*)
-  5.  **data**: Model's fields that you want to appear in the subscription notifications. (*optional*)
+  5.  **data**: Model's fields that you want to appear in the subscription notifications. Based in model's serializer fields(*optional*)
 
 ```js
 subscription{
@@ -207,7 +207,7 @@ subscription{
 
 In this case, the subscription request sent return a websocket message to client like this:
 *{"action": "update", "operation": "subscribe", "ok": true, "stream": "users", "error": null}*
-and from that moment each time than the user with id=5 get modified, you will receive a message
+and from that moment every time the user with id = 5 is modified, you will receive a message
 through websocket's connection with the following format:
 
 ```js
