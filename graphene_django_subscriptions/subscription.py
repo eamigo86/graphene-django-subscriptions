@@ -75,7 +75,7 @@ class Subscription(ObjectType):
         _meta.serializer_class = serializer_class
 
         serializer_fields = [(to_snake_case(field.strip('_')).upper(), to_snake_case(field))
-                             for field in _meta.serializer_class.Meta.fields]
+                             for field in list(_meta.serializer_class().get_fields().keys())]
         model_fields_enum = Enum('{}Fields'.format(_meta.model.__name__), serializer_fields,
                                  description='Desired {} fields in subscription\'s  notification.'
                                  .format(_meta.model.__name__))
