@@ -7,7 +7,7 @@ from .middleware import depromise_subscription
 
 __author__ = 'Ernesto'
 
-VERSION = (0, 0, 4, 'final', '')
+VERSION = (0, 0, 6, 'final', '')
 
 __version__ = get_version(VERSION)
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import copy
 import json
+import inspect
 
 import rx
 from channels import Group
@@ -51,7 +52,7 @@ class Subscription(ObjectType):
     @classmethod
     def __init_subclass_with_meta__(cls, serializer_class=None, stream=None, queryset=None, description='', **options):
 
-        assert issubclass(serializer_class, Serializer), \
+        assert inspect.isclass(serializer_class) and issubclass(serializer_class, Serializer), \
             'You need to pass a valid Serializer subclass in {}.Meta, received "serializer_class = {}"'\
             .format(cls.__name__, serializer_class)
 

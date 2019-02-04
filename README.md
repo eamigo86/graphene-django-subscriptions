@@ -161,8 +161,7 @@ CHANNEL_LAYERS = {
 ...
 ```
 
-You must add **'graphene_django_subscriptions.depromise_subscription'** middleware to your GRAPHENE dict
-config on your settings.py:
+You must add **'graphene_django_subscriptions.depromise_subscription'** middleware at the end of your GRAPHENE dict config on your settings.py:
 
 ```python
 # settings.py
@@ -171,7 +170,7 @@ GRAPHENE = {
     'SCHEMA_INDENT': 4,
     'MIDDLEWARE': [
         # Others middlewares
-        'graphene_django_subscriptions.depromise_subscription,
+        'graphene_django_subscriptions.depromise_subscription',
     ]
 }
 ```
@@ -251,6 +250,11 @@ connection and resend the graphql's subscription request with the new websocket 
 
 ## Change Log:
 
+#### v0.0.6:
+    
+    1. Fixed minor bug on model_fields_enum generation when define fields in serializer class like this: fields = "__all__"
+    2. This avoid malfunction with the posterior versions of graphene-django.
+    
 #### v0.0.4:
     1. Fixed minor bug on *subscription_resolver* function.
 

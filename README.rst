@@ -169,8 +169,7 @@ You should put into your INSTALLED_APPS the channels and channels_api modules an
     }
     ...
 
-You must add **'graphene_django_subscriptions.depromise_subscription'** middleware to your GRAPHENE dict
-config on your settings.py:
+You must add **'graphene_django_subscriptions.depromise_subscription'** middleware at the end of your GRAPHENE dict config on your settings.py:
 
 .. code:: python
 
@@ -180,7 +179,7 @@ config on your settings.py:
         'SCHEMA_INDENT': 4,
         'MIDDLEWARE': [
             # Others middleware
-            'graphene_django_subscriptions.depromise_subscription,
+            'graphene_django_subscriptions.depromise_subscription',
         ]
     }
     ...
@@ -262,6 +261,12 @@ For unsubscribe you must send a graphql request like this:
 
 Change Log:
 -----------
+
+*******
+v0.0.6:
+*******
+1. Fixed minor bug on model_fields_enum generation when define fields in serializer class like this: fields = "__all__"
+2. This avoid malfunction with the posterior versions of graphene-django.
 
 *******
 v0.0.4:
