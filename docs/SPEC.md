@@ -1,14 +1,17 @@
-# SPEC — Modernization of `graphene-django-subscriptions`
+# SPEC — GraphQL Subscriptions as an optional `graphene-django-extras[subscriptions]` extra
 
 **Status:** DRAFT — pending approval
-**Version target:** `0.1.0` (first modern release; see §13 Versioning)
-**Author:** Migration spec
-**Date:** 2026-06-05
+**Decision baseline (approved):**
+- Wire protocol: **preserve** the current model (`channel_id` handshake + HTTP-resolved subscribe), reimplemented on Channels 4.
+- Engine: **native in-house** (Django signals + Channels channel layer); drop `channels-api`.
+- Packaging: **merge** subscriptions into `graphene-django-extras` as an optional
+  `[subscriptions]` extra; keep `graphene-django-subscriptions` as a **deprecated
+  compatibility shim**.
+- Process: **SDD** — this document is the contract; no code until approved.
 
-This is a **spec-driven-development (SDD)** document. It is the contract that the
-implementation and the test suite must satisfy. Nothing in `graphene_django_subscriptions/`
-should be changed until this document is approved. Once approved, every acceptance
-criterion in §11 must be backed by at least one automated test in §12.
+**Target release:** `graphene-django-extras 1.2.0` (adds the `subscriptions` extra) +
+`graphene-django-subscriptions 0.1.0` (final, shim-only).
+**Date:** 2026-06-05
 
 ---
 
@@ -16,499 +19,432 @@ criterion in §11 must be backed by at least one automated test in §12.
 
 ### 1.1 Context
 
-`graphene-django-subscriptions` adds GraphQL subscription support to `graphene-django`
-on top of Django Channels. The current code targets a **Channels 1.x** world that no
-longer exists:
+`graphene-django-subscriptions` adds GraphQL subscriptions to `graphene-django` on top of
+Django Channels. Its current code targets a **Channels 1.x** world that no longer exists
+(`channels-api` deprecated; `Group`/`WebsocketDemultiplexer`/`reply_channel`/`route_class`
+removed; `rx`/`six`/`promise` are Python-2/graphene-2 era).
 
-- `channels-api` (the broadcast/binding engine) is **deprecated** and Channels-1-only.
-- `from channels import Group`, `WebsocketDemultiplexer`, `reply_channel`, `route_class`
-  were **removed** in Channels 2+.
-- `rx.Observable` (RxPY 1) is the graphene-2 subscription mechanism; graphene 3 uses
-  **async generators**.
-- `six` / `promise` / `string_types` are Python-2-era.
+The companion **`graphene-django-extras` 1.1.0** (same author) already runs on the modern
+stack and — critically — **already depends on `djangorestframework`** (it powers
+`DjangoSerializerType`/`DjangoSerializerMutation`). Subscriptions are built on the very
+same `serializer_class` abstraction. Confirmed facts about extras 1.1.0:
 
-The companion package **`graphene-django-extras` 1.1.0** (same author, Jan 2026) already
-runs on **graphene 3 / graphene-django 3.2+ / Python ≥ 3.12 / Django 4.0–6.0**. This
-package must converge on the **same stack** to remain usable alongside it.
+- Build: **Poetry** (`poetry-core>=1.0.0`). Python `>=3.12,<4.0`. Django `>=4.0,<7.0`.
+- Deps: `graphene-django ^3.2`, `djangorestframework ^3`, `django-filter >=22.1`,
+  `python-dateutil`.
+- **No** `channels` / `channels-redis` → these become the new optional extra.
+
+Therefore subscriptions are merged into extras as an **opt-in** feature: base users get
+zero new dependencies; subscription users opt in via the `subscriptions` extra.
 
 ### 1.2 Goals
 
-- **G1** — Run on modern stacks: Python ≥ 3.12, Django ≥ 4.0 (incl. 5.x and 6.0),
-  graphene-django ≥ 3.2, Channels ≥ 4.0, modern `djangorestframework` and `django-filter`.
-- **G2** — **Preserve the public-facing API**: the developer-facing Python API
-  (`Subscription` subclass, `Meta.serializer_class`/`stream`, `.Field()`, the generated
-  enums) **and** the wire protocol (the `channel_id` handshake, the GraphQL subscription
-  request arguments, and the notification JSON payload). See §4 and §5.
-- **G3** — Replace `channels-api` with a **native, in-house** broadcast engine built on
-  Django signals + the Channels channel layer.
-- **G4** — Maximize performance and concurrency (async consumer, O(1) fan-out per event).
-- **G5** — Fix latent correctness bugs without changing the public contract (see §10).
-- **G6** — Ship a rigorous automated test suite and CI matrix (§12, §13).
+- **G1** — Modern stack: Python ≥ 3.12, Django ≥ 4.0 (incl. 5.x, 6.0), graphene-django
+  ≥ 3.2, Channels ≥ 4.0, modern DRF and `django-filter`.
+- **G2** — Install UX:
+  - `pip install graphene-django-extras` / `uv add graphene-django-extras` → **no**
+    `channels`/`channels-redis`; importing `graphene_django_extras` never imports channels.
+  - `pip install "graphene-django-extras[subscriptions]"` / `uv add
+    "graphene-django-extras[subscriptions]"` → enables subscriptions.
+- **G3** — **Preserve the public API**: the developer-facing Python API (`Subscription`
+  subclass, `Meta.serializer_class`/`stream`, `.Field()`, generated enums) and the wire
+  protocol (handshake, subscribe arguments, notification payload). Old import paths keep
+  working through the shim (§5).
+- **G4** — Native in-house broadcast engine replacing `channels-api` (§7.2).
+- **G5** — Maximize performance/concurrency (async consumer, O(1) fan-out per event).
+- **G6** — Fix latent correctness bugs without changing the public contract (§11).
+- **G7** — Rigorous automated tests + CI matrix that proves base install stays
+  channels-free (§13, §14).
 
 ### 1.3 Non-Goals
 
-- **NG1** — Implementing the Apollo `graphql-ws` / `graphql-transport-ws` protocol. (May
-  be a future addition; explicitly out of scope here — the legacy protocol is preserved.)
-- **NG2** — Changing the GraphQL schema-facing semantics of subscriptions (argument names,
-  enums, payload shape) beyond what §10 fixes require.
-- **NG3** — Supporting Python 2 or Channels < 4 or graphene < 3.
-- **NG4** — Providing a generic CRUD-over-websocket layer (the `channels-api`
-  `ResourceBinding` inbound CRUD feature). Only the subscription/broadcast half is ported.
+- **NG1** — Apollo `graphql-ws`/`graphql-transport-ws` protocol (future; legacy protocol
+  preserved here).
+- **NG2** — Changing subscription schema semantics beyond the §11 correctness fixes.
+- **NG3** — Python 2 / Channels < 4 / graphene < 3.
+- **NG4** — Porting the `channels-api` inbound CRUD-over-websocket feature (only the
+  subscription/broadcast half is ported).
 
 ---
 
-## 2. Target Compatibility Matrix
+## 2. Deliverables & Repositories
 
-| Component            | Constraint                         | Notes                                              |
-|---------------------|-------------------------------------|----------------------------------------------------|
-| Python              | `>=3.12,<4.0`                       | Aligns with `graphene-django-extras` 1.1.0         |
-| Django              | `>=4.0,<7.0`                        | Test 4.0, 4.2 (LTS), 5.0, 5.2 (LTS), 6.0           |
-| Channels            | `>=4.0,<5.0`                        | ASGI consumers, channel layers                     |
-| graphene            | `>=3.1,<4.0`                        | Pulled via graphene-django                         |
-| graphene-django     | `>=3.2,<4.0`                        | graphene-3 era                                     |
-| graphql-core        | `>=3.2,<3.3`                        | Transitive; `subscribe()` async path               |
-| djangorestframework | `>=3.14`                            | Serializers only                                   |
-| django-filter       | `>=23.0`                            | "Modern django-filters" per request; ecosystem use |
-| graphene-django-extras | `>=1.1.0` (companion, optional dep) | Not a hard runtime import; documented pairing    |
-| channels-redis      | optional extra `[redis]`            | Required for multi-process production (see §6.6)   |
+Two repos are touched. **Implementation requires adding the `graphene-django-extras` repo
+to this session's scope** (currently only `graphene-django-subscriptions` is in scope).
 
-**Dependencies removed:** `channels-api`, `rx`, `six`, `promise`.
+| Repo | Role after this work |
+|------|----------------------|
+| `eamigo86/graphene-django-extras` | **Primary.** New `graphene_django_extras/subscriptions/` package; `[subscriptions]` extra in `pyproject.toml`; tests; docs. Released as `1.2.0`. |
+| `eamigo86/graphene-django-subscriptions` | **Shim.** Stripped to a thin compatibility package that depends on `graphene-django-extras[subscriptions]` and re-exports symbols with `DeprecationWarning`. Released as `0.1.0` (final). Hosts this SPEC under `docs/`. |
 
 ---
 
-## 3. Architecture: Old → New Mapping
+## 3. Target Compatibility Matrix
 
-The Channels 1.x model maps almost 1:1 onto Channels 4, which is what makes preserving
-the public protocol feasible.
+| Component            | Constraint        | Notes                                       |
+|---------------------|-------------------|---------------------------------------------|
+| Python              | `>=3.12,<4.0`     | Matches extras 1.1.0                         |
+| Django              | `>=4.0,<7.0`      | CI: 4.2 (LTS), 5.2 (LTS), 6.0               |
+| Channels            | `>=4.0,<5.0`      | **extra only**                              |
+| channels-redis      | `>=4.2`           | **extra only**, prod multi-process          |
+| graphene-django     | `>=3.2,<4.0`      | already an extras core dep                   |
+| graphql-core        | `>=3.2,<3.3`      | transitive; `subscribe()` async path         |
+| djangorestframework | `^3` (≥3.14)      | already an extras **core** dep (shared)      |
+| django-filter       | `>=22.1`          | already an extras core dep                   |
 
-| Channels 1.x (current)                          | Channels 4 (new)                                                |
-|-------------------------------------------------|-----------------------------------------------------------------|
-| `message.reply_channel` (per-connection)        | `consumer.channel_name` (per-connection)                        |
-| `Group(name).add(reply_channel)`                | `async_to_sync(channel_layer.group_add)(name, channel_name)`   |
-| `Group(name).discard(reply_channel)`            | `async_to_sync(channel_layer.group_discard)(name, channel_name)`|
-| `Group(name).send({"text": ...})`               | `async_to_sync(channel_layer.group_send)(name, event)`         |
-| `WebsocketDemultiplexer` (`channels.generic`)   | `AsyncJsonWebsocketConsumer` subclass                          |
-| `channels_api` `ResourceBinding` (signals→group)| In-house `SubscriptionBinding` (signals→`group_send`)          |
-| `route_class(Demux)` + `CHANNEL_LAYERS.ROUTING` | `ProtocolTypeRouter`/`URLRouter` + `ASGI_APPLICATION`          |
-| `rx.Observable.from_([conf])` (graphene 2)      | `async def subscribe_*` async generator yielding one `conf`     |
-| `depromise_subscription` middleware             | `SubscriptionGraphQLView` HTTP executor (drives one yield)      |
-
-**Two-channel flow (preserved):**
-
-1. **Handshake (WS):** client connects to the WS endpoint; server `accept()`s and sends
-   `{"channel_id": "<token>", "connect": "success"}`.
-2. **Subscribe (HTTP):** client POSTs a GraphQL `subscription{ … }` to the normal HTTP
-   GraphQL endpoint, echoing `channelId`. The resolver joins/leaves the relevant group(s)
-   for that channel and returns a one-shot confirmation `{ ok, error, stream, … }`.
-3. **Notify (WS):** when a watched model instance is created/updated/deleted, the binding
-   broadcasts the serialized payload to the group; every subscribed connection receives it
-   over its WS.
-
-> The channel layer must be **cross-process capable** (Redis) when HTTP workers and WS
-> workers run in separate processes — exactly as the old design required a non-inmemory
-> backend. `InMemoryChannelLayer` works only single-process (dev/tests). See §6.6.
+**Removed for good:** `channels-api`, `rx`, `six`, `promise`.
 
 ---
 
-## 4. Public API Contract (developer-facing)
+## 4. Old → New Architecture Mapping
 
-The following symbols and their shapes are **preserved**. Behavioural changes are limited
-to those listed in §8 and §10.
+The Channels 1.x model maps ~1:1 onto Channels 4, which is what makes preserving the public
+protocol feasible.
 
-### 4.1 `graphene_django_subscriptions.subscription.Subscription`
+| Channels 1.x (current)                          | Channels 4 (new)                                                 |
+|-------------------------------------------------|------------------------------------------------------------------|
+| `message.reply_channel`                         | `consumer.channel_name`                                          |
+| `Group(name).add(reply_channel)`                | `async_to_sync(channel_layer.group_add)(name, channel_name)`    |
+| `Group(name).discard(reply_channel)`            | `async_to_sync(channel_layer.group_discard)(name, channel_name)` |
+| `Group(name).send({"text": …})`                 | `async_to_sync(channel_layer.group_send)(name, event)`          |
+| `WebsocketDemultiplexer`                         | `AsyncJsonWebsocketConsumer` subclass                            |
+| `channels_api` `ResourceBinding` (signals→group)| in-house `SubscriptionBinding` (signals→`group_send`)           |
+| `route_class` + `CHANNEL_LAYERS.ROUTING`        | `ProtocolTypeRouter`/`URLRouter` + `ASGI_APPLICATION`           |
+| `rx.Observable.from_([conf])`                   | `async def subscribe_*` async generator yielding one `conf`      |
+| `depromise_subscription` middleware             | `SubscriptionGraphQLView` HTTP executor                          |
 
-Abstract `ObjectType`. Subclassed via `Meta`:
+**Two-channel flow (preserved):** (1) WS connect → server sends
+`{"channel_id", "connect":"success"}`; (2) client POSTs a GraphQL `subscription{…}` over
+HTTP echoing `channelId` → resolver joins/leaves groups, returns one-shot confirmation;
+(3) model change → binding broadcasts serialized payload to the group → subscribers receive
+it over WS. Requires a cross-process channel layer (Redis) when HTTP and WS run in separate
+processes (§7.6).
+
+---
+
+## 5. Packaging Design (the core of this change)
+
+### 5.1 Dependency isolation in extras (Poetry)
+
+```toml
+# graphene-django-extras/pyproject.toml
+[tool.poetry.dependencies]
+python              = ">=3.12,<4.0"
+django              = ">=4.0,<7.0"
+graphene-django     = "^3.2"
+djangorestframework = "^3"
+django-filter       = ">=22.1"
+python-dateutil     = ">=2.8.2,<3.0"
+channels            = {version = ">=4.0,<5.0", optional = true}
+channels-redis      = {version = ">=4.2",     optional = true}
+
+[tool.poetry.extras]
+subscriptions = ["channels", "channels-redis"]
+```
+
+(Equivalent PEP 621 `[project.optional-dependencies]` is acceptable if the repo migrates to
+that form; Poetry 2.x supports it. The chosen form must keep `channels` optional.)
+
+### 5.2 Import isolation (base install must never import channels)
+
+- All subscription code lives under `graphene_django_extras/subscriptions/`.
+- `graphene_django_extras/__init__.py` **must not** import that subpackage (enforced by a
+  test, §14 T-ISO).
+- `graphene_django_extras/subscriptions/__init__.py` guards channels at import time:
 
 ```python
+try:
+    import channels  # noqa: F401
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        "GraphQL subscriptions require the 'subscriptions' extra. Install with:\n"
+        '    pip install "graphene-django-extras[subscriptions]"'
+    ) from exc
+```
+
+So `import graphene_django_extras` is channels-free; only an explicit
+`from graphene_django_extras.subscriptions import …` (or wiring the consumer) pulls channels,
+with a friendly error if the extra is missing.
+
+### 5.3 Canonical public import paths (new)
+
+```python
+from graphene_django_extras.subscriptions import (
+    Subscription, GraphqlAPIDemultiplexer, SubscriptionGraphQLView,
+)
+```
+
+### 5.4 Compatibility shim — `graphene-django-subscriptions` 0.1.0 (final)
+
+The shim package is reduced to:
+
+- `pyproject.toml` depending on `graphene-django-extras[subscriptions] >=1.2,<2`.
+- A module tree mirroring the old import paths, each re-exporting from the new location and
+  emitting `DeprecationWarning` on import:
+
+```python
+# graphene_django_subscriptions/subscription.py  (shim)
+import warnings
+from graphene_django_extras.subscriptions import Subscription  # noqa: F401
+warnings.warn(
+    "graphene_django_subscriptions is deprecated; import from "
+    "graphene_django_extras.subscriptions instead.",
+    DeprecationWarning, stacklevel=2,
+)
+```
+
+Old code (`from graphene_django_subscriptions.subscription import Subscription`,
+`...consumers import GraphqlAPIDemultiplexer`, `...depromise_subscription`) keeps working
+for one deprecation cycle. README of the shim points to extras.
+
+---
+
+## 6. Public API Contract (developer-facing) — preserved
+
+Behaviour is preserved; only the import root changes (and is bridged by the shim §5.4).
+
+### 6.1 `Subscription`
+
+Abstract `ObjectType`, subclassed via `Meta`:
+
+```python
+from graphene_django_extras.subscriptions import Subscription
+
 class UserSubscription(Subscription):
     class Meta:
         serializer_class = UserSerializer   # required; DRF Serializer subclass
         stream = "users"                     # required; str
-        queryset = None                      # optional; must match serializer model
+        queryset = None                      # optional; model must match serializer
         description = "User Subscription"    # optional
 ```
 
-Preserved output fields (unchanged): `ok: Boolean`, `error: String`, `stream: String`,
-`operation: OperationSubscriptionEnum`, `action: ActionSubscriptionEnum`.
+- Output fields (unchanged): `ok`, `error`, `stream`, `operation`, `action`.
+- Generated arguments (unchanged names/semantics): `channelId` (req), `action` (req),
+  `operation` (req), `id` (opt), `data` (opt, `[<Model>FieldsEnum]`).
+- Enums (unchanged values): `ActionSubscriptionEnum {CREATE, UPDATE, DELETE, ALL_ACTIONS}`,
+  `OperationSubscriptionEnum {SUBSCRIBE, UNSUBSCRIBE}`, `<Model>Fields` (same UPPER_SNAKE
+  derivation as `subscription.py:78-82`).
+- Classmethods preserved: `Field`, `model_label`, `_group_name`, `get_binding`.
 
-Preserved generated argument set on `.Field()` (unchanged names & semantics):
+### 6.2 `GraphqlAPIDemultiplexer`
 
-| Arg          | Type                          | Req | Meaning                                              |
-|--------------|-------------------------------|-----|------------------------------------------------------|
-| `channelId`  | `String`                      | yes | Connection token from the handshake                  |
-| `action`     | `ActionSubscriptionEnum`      | yes | `CREATE` / `UPDATE` / `DELETE` / `ALL_ACTIONS`       |
-| `operation`  | `OperationSubscriptionEnum`   | yes | `SUBSCRIBE` / `UNSUBSCRIBE`                           |
-| `id`         | `ID`                          | no  | Instance id to scope the subscription                |
-| `data`       | `[<Model>FieldsEnum]`         | no  | Fields to include in notifications                   |
-
-Preserved enums (unchanged values):
-
-- `ActionSubscriptionEnum = {CREATE, UPDATE, DELETE, ALL_ACTIONS}`
-- `OperationSubscriptionEnum = {SUBSCRIBE, UNSUBSCRIBE}`
-- `<Model>Fields` — auto-generated from the serializer field names (UPPER_SNAKE → snake),
-  same algorithm as today (`subscription.py:78-82`).
-
-Preserved classmethods (signatures kept): `Field(cls, *args, **kwargs)`,
-`model_label(cls)`, `_group_name(cls, action, id=None)`, `get_binding(cls)`.
-
-> `subscription_resolver` (the synchronous graphene-2 resolver) is **replaced internally**
-> by an async `subscribe_*` generator + the HTTP executor (§6.3). It is not part of the
-> documented public API, but a compat wrapper is kept where cheap (§8).
-
-### 4.2 `graphene_django_subscriptions.consumers.GraphqlAPIDemultiplexer`
-
-Preserved as the base WS consumer users subclass. New base class is an
-`AsyncJsonWebsocketConsumer`. Users still declare a stream→subscription mapping:
+Base WS consumer users subclass; new base is `AsyncJsonWebsocketConsumer`:
 
 ```python
 class CustomAppDemultiplexer(GraphqlAPIDemultiplexer):
-    subscriptions = {                 # preferred name
-        "users": UserSubscription,
-        "groups": GroupSubscription,
-    }
-    # `consumers = {...: Sub.get_binding().consumer}` accepted as a deprecated alias (§8)
+    subscriptions = {"users": UserSubscription, "groups": GroupSubscription}
+    # `consumers = {stream: Sub.get_binding().consumer}` accepted as deprecated alias (§10)
 ```
 
-On `connect`: accept + send the `{"channel_id", "connect"}` frame (§5.1). The consumer
-registers the signal bindings for its subscriptions on first use (idempotent).
+### 6.3 `get_binding()` / `SubscriptionGraphQLView`
 
-### 4.3 `get_binding()`
-
-Returns a `SubscriptionBinding` bound to `(model, stream, serializer_class, queryset)`.
-Calling it wires the broadcast signal handlers for that model (idempotent). The legacy
-`.consumer` attribute is preserved as a deprecated alias that resolves to the demultiplexer
-mapping target (§8).
-
-### 4.4 Module exports (`__init__.py`)
-
-`__all__` keeps `Subscription`, `GraphqlAPIDemultiplexer`. `depromise_subscription` is
-kept as a deprecated no-op shim (§8); `SubscriptionGraphQLView` is added (§6.3).
+`get_binding()` returns a `SubscriptionBinding` (wires the model signals, idempotent);
+legacy `.consumer` attribute preserved as a deprecated alias. `SubscriptionGraphQLView`
+replaces the `depromise_subscription` middleware (§7.3).
 
 ---
 
-## 5. Wire Protocol Contract (preserved)
+## 7. Component Design
 
-### 5.1 Handshake frame (server → client, on WS connect)
+(Engine design is identical regardless of host package.)
 
-```json
-{ "channel_id": "<opaque-token>", "connect": "success" }
-```
+### 7.1 `Subscription` type
+Keep `__init_subclass_with_meta__` validation and enum/argument generation verbatim; drop
+`six.string_types`→`str`. The requested-field set is **not** stored on the shared
+`serializer_class.Meta` (that is the §11.1 race) — it is carried per-connection (§7.5).
 
-- `channel_id` is **opaque** to the client (stored and echoed back). Its concrete value
-  changes from the legacy `reply_channel` suffix to the Channels-4 `channel_name` (or a
-  token deterministically resolvable to it). This is a permitted change because the README
-  already specifies the value is stored and reused as an opaque handle.
+### 7.2 `SubscriptionBinding` (replaces channels-api)
+Per `(model, stream, serializer_class)`:
+- Connect `post_save`/`post_delete` receivers, deduplicated via stable `dispatch_uid`.
+- `post_save`: `action = "create" if created else "update"`; `post_delete`: `"delete"`.
+- On signal: serialize the instance **once**; build payload
+  `{"action", "model": model_label, "data": <full>}`; `group_send` to `"<label>-<action>"`
+  **and** `"<label>-<action>-<pk>"` with event
+  `{"type":"subscription.notify","stream":stream,"payload":payload}`.
+- O(1) sends per event; field projection happens at the consumer (§7.5), so one
+  serialization regardless of subscriber count (trade: a few extra bytes over the layer for
+  correct per-connection projection).
 
-### 5.2 Subscribe / unsubscribe request (client → server, over HTTP GraphQL)
+### 7.3 `SubscriptionGraphQLView`
+graphene-django's `GraphQLView` doesn't execute subscriptions. This subclass, when
+`operation == "subscription"`, calls graphql-core `subscribe(...)`, drives the async
+iterator for **exactly one** value via `async_to_sync` (`anext` then `aclose`), and returns
+that `ExecutionResult`. Side effects (group join/leave) run inside the `subscribe_*`
+generator before the single `yield`.
 
-```graphql
-subscription {
-  userSubscription(
-    action: UPDATE,
-    operation: SUBSCRIBE,
-    channelId: "<opaque-token>",
-    id: 5,
-    data: [ID, USERNAME, FIRST_NAME, LAST_NAME, EMAIL]
-  ) { ok error stream }
-}
-```
+### 7.4 `subscribe_*` async generator
+Reads `action/operation/channel_id/id/data`; resolves channel name from `channel_id`;
+`ALL_ACTIONS` iterates `(create,update,delete)`; `SUBSCRIBE`→`group_add` + register control
+message (fields), `UNSUBSCRIBE`→`group_discard` + deregister; `yield` one confirmation
+`cls(ok, error, stream, operation, action)` then return. On error, yield `ok=False,
+error=str(e)`. Group names built via `_group_name`; over-long/invalid labels hashed to stay
+within the Channels group-name limit.
 
-Synchronous one-shot response (unchanged shape):
+### 7.5 Per-connection field selection (correctness)
+- On `SUBSCRIBE`: resolver `channel_layer.send(channel_name,
+  {"type":"subscription.register","group":g,"fields":[...]})`.
+- Consumer keeps `self._fields: dict[group, list[str]|None]`; `subscription_notify` filters
+  `payload["data"]` to the registered fields before `send_json`. `None`/empty ⇒ full data.
+- `UNSUBSCRIBE` sends `subscription.deregister`. Cross-process safe because
+  `channel_layer.send(channel_name, …)` routes to the specific consumer.
 
-```json
-{ "data": { "userSubscription": { "ok": true, "error": null, "stream": "users" } } }
-```
-
-### 5.3 Notification frame (server → client, over WS)
-
-```json
-{
-  "stream": "users",
-  "payload": {
-    "action": "update",
-    "model": "auth.user",
-    "data": { "id": 5, "username": "meaghan90", "email": "meaghan@gmail.com" }
-  }
-}
-```
-
-- `data` is filtered to the fields requested in the subscribe `data` argument, **per
-  connection** (correctness fix, §10.1). When `data` is omitted, the full serializer
-  output is sent.
-
-### 5.4 Group naming (preserved)
-
-```
-<app_label>.<model_name>-<action>          # action-wide
-<app_label>.<model_name>-<action>-<id>      # instance-scoped
-```
-
-`ALL_ACTIONS` subscribes/unsubscribes to the `create`, `update`, `delete` group variants.
-Group names must satisfy the Channels group-name charset (`[A-Za-z0-9._-]`, ≤ 100 chars);
-the existing scheme already complies. Long/invalid model labels are hashed (§6.4).
+### 7.6 Consumer & routing/settings
+`AsyncJsonWebsocketConsumer`: `connect`→accept + handshake frame + ensure bindings
+registered; `subscription_notify`/`register`/`deregister` handlers; best-effort
+`group_discard` on `disconnect`. User wiring migrates from `CHANNEL_LAYERS.ROUTING`/
+`route_class` to `ProtocolTypeRouter`/`URLRouter` + `ASGI_APPLICATION`; prod uses a Redis
+channel layer. Documented in §9.
 
 ---
 
-## 6. Component Design
+## 8. File-level Plan (informational)
 
-### 6.1 `Subscription` type
+**extras repo (`graphene_django_extras/subscriptions/`):**
 
-- Keep `__init_subclass_with_meta__` validation (serializer subclass check, stream string
-  check, queryset/serializer model match) and enum/argument generation verbatim.
-- Drop `six.string_types` → `str`.
-- The per-subscription requested-field set is **not** stored on the shared
-  `serializer_class.Meta` (that is the §10.1 race). It is carried through the subscribe
-  control message to the consumer (§6.5).
+| File              | Content                                                            |
+|-------------------|-------------------------------------------------------------------|
+| `__init__.py`     | channels import-guard (§5.2); public exports                      |
+| `subscription.py` | graphene-3 `Subscription` type; async `subscribe_*`               |
+| `consumers.py`    | `GraphqlAPIDemultiplexer` (`AsyncJsonWebsocketConsumer`)          |
+| `bindings.py`     | `SubscriptionBinding` (signals)                                   |
+| `mixins.py`       | serialize/deserialize + field-projection helpers                  |
+| `views.py`        | `SubscriptionGraphQLView`                                         |
+| `compat.py`       | `depromise_subscription` deprecated shim                           |
+| `pyproject.toml`  | add optional deps + `[tool.poetry.extras] subscriptions`          |
+| `tests/subscriptions/` | full suite (§14)                                             |
+| docs              | subscriptions guide + migration                                   |
 
-### 6.2 Broadcast engine — `SubscriptionBinding` (replaces `channels-api`)
-
-For each `(model, stream, serializer_class)`:
-
-- Connect `post_save` and `post_delete` receivers (deduplicated by a registry keyed on
-  `(model, stream)`; weak=False, with a stable `dispatch_uid`).
-- `post_save`: `action = "create" if created else "update"`.
-- `post_delete`: `action = "delete"`.
-- On signal:
-  1. Serialize the instance **once**: `serializer_class(instance).data`.
-  2. Build payload `{"action", "model": model_label, "data": <full data>}`.
-  3. `group_send` to **two** groups: `"<label>-<action>"` and `"<label>-<action>-<pk>"`,
-     with an event `{"type": "subscription.notify", "stream": stream, "payload": payload}`.
-- Fan-out is O(1) sends per event from the producer's perspective; the channel layer does
-  the multiplexing. Field filtering happens at the consumer (§6.5), so the instance is
-  serialized once regardless of subscriber count.
-
-> Rationale for full-serialize-once + filter-at-consumer: different subscribers request
-> different `data` field sets for the same group. Serializing per subscriber (the only
-> correct alternative that filters at the producer) would be O(subscribers). We trade a
-> few extra bytes over the channel layer for a single serialization and correct
-> per-connection projection.
-
-### 6.3 HTTP subscription executor — `SubscriptionGraphQLView`
-
-graphene-django's `GraphQLView` does not execute subscription operations. We provide a
-`GraphQLView` subclass that, when `operation == "subscription"`:
-
-1. Calls graphql-core `subscribe(schema, document, …)` (async).
-2. Drives the returned async iterator for **exactly one** value via `async_to_sync`
-   (`anext`), then closes it (`aclose`).
-3. Returns that first `ExecutionResult` as the HTTP response.
-
-The side effects (group join/leave) are performed inside the `subscribe_*` generator
-before the single `yield`. This reproduces the legacy "subscribe over HTTP returns a
-confirmation" behavior. The view is the documented replacement for the
-`depromise_subscription` middleware.
-
-### 6.4 `subscribe_*` async generator (per subscription field)
-
-`Subscription.Field()` wires an async generator resolver that:
-
-1. Reads `action`, `operation`, `channel_id`, `id`, `data` from kwargs.
-2. Resolves the target channel name from `channel_id`.
-3. For `ALL_ACTIONS`, iterates `("create","update","delete")`; else uses `action`.
-4. `SUBSCRIBE` → `group_add(group, channel_name)` and send a register control message
-   carrying the requested `data` fields (§6.5). `UNSUBSCRIBE` → `group_discard` + a
-   deregister control message.
-5. `yield cls(ok=True, error=None, stream=…, operation=…, action=…)` exactly once, then
-   return. On exception, yield `ok=False, error=str(e)`.
-
-Group-name building reuses `_group_name`; over-long/invalid labels are length-checked and
-hashed to stay within the Channels group-name limit (defensive; current scheme already
-fits common cases).
-
-### 6.5 Per-connection field selection (correctness)
-
-The requested `data` fields cannot be stored on the shared serializer class. Instead:
-
-- On `SUBSCRIBE`, the resolver `channel_layer.send(channel_name, {"type":
-  "subscription.register", "group": g, "fields": [...]})`.
-- The consumer keeps `self._fields: dict[group_name, list[str] | None]`.
-- In the `subscription_notify` handler, the consumer filters `payload["data"]` to the
-  fields registered for that group before `self.send_json(...)`. `None`/empty ⇒ full data.
-- On `UNSUBSCRIBE`, a `subscription.deregister` message clears the entry.
-
-This is cross-process safe because `channel_layer.send(channel_name, …)` routes to the
-specific WS consumer regardless of which process the HTTP resolver ran in.
-
-### 6.6 Consumer — `GraphqlAPIDemultiplexer`
-
-- `AsyncJsonWebsocketConsumer`.
-- `connect`: `await self.accept()`, compute `channel_id` from `self.channel_name`, send the
-  handshake frame, ensure each declared subscription's `SubscriptionBinding` is registered.
-- `subscription_notify(event)`: filter per §6.5, `await self.send_json({"stream", "payload"})`.
-- `subscription_register` / `subscription_deregister`: update `self._fields`.
-- `disconnect`: groups are cleaned by the channel layer on channel expiry; we also best-
-  effort `group_discard` for known groups.
-
-### 6.7 Routing & settings (user-facing migration)
-
-Old (`CHANNEL_LAYERS["default"]["ROUTING"]`, `route_class`) → new ASGI:
-
-```python
-# asgi.py
-application = ProtocolTypeRouter({
-    "http": django_asgi_app,
-    "websocket": URLRouter([ re_path(r"^ws/graphql/$", CustomAppDemultiplexer.as_asgi()) ]),
-})
-# settings.py
-ASGI_APPLICATION = "myproject.asgi.application"
-CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer",
-                              "CONFIG": {"hosts": [("127.0.0.1", 6379)]}}}
-```
-
-This delta is documented in the migration guide (§9) and the rewritten README.
+**shim repo (`graphene-django-subscriptions`):** strip to re-export modules + `pyproject.toml`
+depending on `graphene-django-extras[subscriptions]`; bump to `0.1.0`; keep `docs/SPEC.md`.
 
 ---
 
-## 7. File-level Plan (implementation map — informational)
+## 9. Migration Guide (end users) — outline
 
-| File                       | Change                                                                  |
-|----------------------------|-------------------------------------------------------------------------|
-| `subscription.py`          | graphene-3 type; async `subscribe_*`; drop `rx`/`six`/`copy reply_channel` |
-| `consumers.py`             | `AsyncJsonWebsocketConsumer` demultiplexer + handlers                    |
-| `bindings.py`              | in-house `SubscriptionBinding` (signals) replacing channels-api          |
-| `mixins.py`                | keep serialize/deserialize helpers; drop `channels_api`/`Group` imports  |
-| `middleware.py`            | `depromise_subscription` → deprecated shim; logic moves to the view      |
-| `views.py` (new)           | `SubscriptionGraphQLView`                                                |
-| `__init__.py`              | exports + version bump                                                   |
-| `pyproject.toml` (new)     | replace `setup.py`/`setup.cfg`; modern metadata & deps                   |
-| `tests/` (new)             | full suite (§12)                                                         |
-| `.github/workflows/ci.yml` (new) | matrix CI (§13)                                                    |
-| `README.*`                 | rewrite for the new stack & migration guide                              |
+1. `pip install "graphene-django-extras[subscriptions]"` (or keep
+   `graphene-django-subscriptions`, now a shim that pulls it).
+2. Update imports to `graphene_django_extras.subscriptions` (old paths still work, warn).
+3. Remove `channels_api` from `INSTALLED_APPS`.
+4. Replace `routing.py` + `CHANNEL_LAYERS.ROUTING` with `asgi.py` + `ASGI_APPLICATION`.
+5. Replace the `GRAPHENE.MIDDLEWARE` `depromise_subscription` entry with the URL served by
+   `SubscriptionGraphQLView`.
+6. Rename `consumers={….consumer}` → `subscriptions={stream: Sub}` (old form warns/works).
+7. Configure a Redis channel layer for multi-process deployments.
 
 ---
 
-## 8. Backward-Compatibility & Deprecations
+## 10. Backward-Compatibility & Deprecations
 
-- **Preserved as-is:** `Subscription` (Meta keys, enums, args, output fields, `.Field()`,
-  `model_label`, `_group_name`, `get_binding`), `GraphqlAPIDemultiplexer` name and the
-  stream→subscription mapping concept, the wire protocol of §5.
-- **Deprecated (kept working with `DeprecationWarning`):**
-  - `consumers = {stream: Sub.get_binding().consumer}` mapping form → use `subscriptions
-    = {stream: Sub}`. The `.consumer` attribute resolves to a binding handle so the old
-    form still wires correctly.
-  - `depromise_subscription` middleware → no-op shim; replaced by `SubscriptionGraphQLView`.
-- **Breaking (documented, unavoidable):**
-  - `CHANNEL_LAYERS[...]["ROUTING"]` + `route_class` → ASGI `ProtocolTypeRouter`/`URLRouter`
-    + `ASGI_APPLICATION` (Channels-4 requirement, not under our control).
-  - `info.context.reply_channel` is gone; the resolver uses `channelId` + channel layer.
-  - Python 2 / graphene 2 / Channels < 4 no longer supported.
-
-A `CHANGELOG`/README "Migration from 0.0.x" section enumerates each item with before/after.
+- **Preserved:** `Subscription` (Meta keys, enums, args, outputs, `Field`, `model_label`,
+  `_group_name`, `get_binding`), `GraphqlAPIDemultiplexer`, the wire protocol (§4), and old
+  import paths via the shim.
+- **Deprecated (work + `DeprecationWarning`):** `graphene_django_subscriptions.*` imports;
+  `consumers={stream: Sub.get_binding().consumer}` form; `depromise_subscription`.
+- **Breaking (documented):** Channels-4 routing/settings change; `info.context.reply_channel`
+  gone (resolver uses `channelId`); Python 2 / graphene 2 / Channels < 4 dropped.
 
 ---
 
-## 9. Migration Guide (for end users) — outline
+## 11. Correctness / Security Fixes (no public-contract change)
 
-1. Bump deps; remove `channels_api` from `INSTALLED_APPS`.
-2. Replace `routing.py` + `CHANNEL_LAYERS.ROUTING` with `asgi.py` + `ASGI_APPLICATION`.
-3. Replace the `GRAPHENE.MIDDLEWARE` `depromise_subscription` entry with the
-   `SubscriptionGraphQLView` URL.
-4. Rename `consumers={...get_binding().consumer}` → `subscriptions={... : Sub}` (optional;
-   old form warns but works).
-5. Configure a Redis channel layer for multi-process deployments.
-
----
-
-## 10. Correctness / Security Fixes (no public-contract change)
-
-- **10.1 `only_fields` global mutation race.** Today `subscription_resolver` does
-  `setattr(cls._meta.serializer_class.Meta, "only_fields", data)` — shared mutable state,
-  last-writer-wins across all connections, a real concurrency bug. Fixed by per-connection
-  field selection (§6.5). Public `data` argument and payload shape are unchanged.
-- **10.2 Broad `except Exception`.** Preserve the public contract (errors surface in the
-  `error` field) but log via `logging` and avoid swallowing `BaseException`.
-- **10.3 Group-name validation.** Enforce the Channels charset/length; hash overflowing
-  labels to prevent silent channel-layer failures.
-- **10.4 Signal handler idempotency.** Deduplicate binding registration via `dispatch_uid`
-  to avoid duplicate notifications when a demultiplexer is instantiated repeatedly.
+- **11.1 `only_fields` global mutation race** — today `setattr(serializer_class.Meta,
+  "only_fields", data)` is shared mutable state (last-writer-wins across connections). Fixed
+  by per-connection field selection (§7.5).
+- **11.2** Replace broad `except Exception` swallowing with logging; never catch
+  `BaseException`.
+- **11.3** Enforce Channels group-name charset/length; hash overflowing labels.
+- **11.4** Idempotent signal registration via `dispatch_uid`.
 
 ---
 
-## 11. Acceptance Criteria
+## 12. Acceptance Criteria
 
-Each is testable (§12 cross-refs in brackets).
-
-- **AC1** Package imports and `Subscription` subclasses build a valid schema on
-  Python 3.12+, Django ≥4.0, graphene-django ≥3.2 with **no** `rx`/`six`/`promise`/
-  `channels_api` imports anywhere. [T-UNIT, T-IMPORT]
-- **AC2** WS connect yields `{"channel_id": <str>, "connect": "success"}`. [T-CONSUMER]
-- **AC3** A `subscription{…operation: SUBSCRIBE…}` over the HTTP view returns
-  `{ok: true, error: null, stream: <stream>}` and adds `channel_name` to the correct
-  group(s). [T-RESOLVER, T-E2E]
-- **AC4** After subscribing to `UPDATE id:5`, saving instance 5 delivers a WS frame
-  matching §5.3 with `action:"update"`, `model:"<label>"`, and `data` filtered to the
-  requested fields. [T-E2E]
-- **AC5** `CREATE`/`DELETE`/`ALL_ACTIONS` deliver on the corresponding model events; other
-  actions do not. [T-E2E]
-- **AC6** `UNSUBSCRIBE` removes group membership; subsequent events deliver nothing. [T-E2E]
-- **AC7** Omitting `data` delivers the full serializer payload; two connections with
-  different `data` sets on the same group each receive their own projection (proves §10.1
-  is fixed). [T-E2E, T-CONCURRENCY]
-- **AC8** Generated `<Model>Fields` enum and `Action`/`Operation` enums match the legacy
-  values (snapshot). [T-UNIT]
-- **AC9** Deprecated `consumers={….consumer}` form and `depromise_subscription` import keep
-  working and emit `DeprecationWarning`. [T-COMPAT]
-- **AC10** CI passes across the full version matrix (§13). [CI]
+- **AC1** With only `graphene-django-extras` installed (no channels), `import
+  graphene_django_extras` succeeds and imports **no** `channels`; `import
+  graphene_django_extras.subscriptions` raises the friendly `[subscriptions]` ImportError.
+  [T-ISO]
+- **AC2** With the extra installed, `Subscription` subclasses build a valid schema on
+  Python 3.12+, Django ≥4.0, graphene-django ≥3.2; no `rx`/`six`/`promise`/`channels_api`
+  imports anywhere. [T-IMPORT, T-UNIT]
+- **AC3** WS connect yields `{"channel_id": <str>, "connect": "success"}`. [T-CONSUMER]
+- **AC4** `subscription{…SUBSCRIBE…}` over the HTTP view returns
+  `{ok:true,error:null,stream:<stream>}` and adds the channel to the correct group(s).
+  [T-RESOLVER, T-E2E]
+- **AC5** After `SUBSCRIBE UPDATE id:5`, saving instance 5 delivers a WS frame per §… with
+  `action:"update"`, `model:"<label>"`, `data` filtered to requested fields. [T-E2E]
+- **AC6** `CREATE`/`DELETE`/`ALL_ACTIONS` deliver on the matching events; others don't.
+  [T-E2E]
+- **AC7** `UNSUBSCRIBE` removes membership; later events deliver nothing. [T-E2E]
+- **AC8** Omitting `data` ⇒ full payload; two connections with different `data` on the same
+  group each get their own projection (proves §11.1 fixed). [T-CONCURRENCY]
+- **AC9** Generated enums match legacy values (snapshot). [T-UNIT]
+- **AC10** Shim: `graphene_django_subscriptions.*` old imports work and emit
+  `DeprecationWarning`; deprecated `consumers={…}` form still wires. [T-COMPAT]
+- **AC11** CI matrix green, incl. a base-install (no-extra) job that asserts channels is
+  absent. [CI]
 
 ---
 
-## 12. Test Plan
+## 13. Packaging & CI
+
+- **Packaging:** extras `pyproject.toml` gains optional `channels`/`channels-redis` + the
+  `subscriptions` extra (§5.1). Shim repo migrates to `pyproject.toml` depending on
+  `graphene-django-extras[subscriptions]`.
+- **CI (GitHub Actions, both repos):** matrix Python {3.12, 3.13} × Django {4.2, 5.2, 6.0};
+  jobs: (a) **base install** — assert `channels` not importable and base import works;
+  (b) **`[subscriptions]` install** — full subscription test suite; lint (`ruff`),
+  format check, coverage ≥ 90% on subscription modules.
+
+---
+
+## 14. Test Plan
 
 Stack: `pytest`, `pytest-django`, `pytest-asyncio`, Channels `WebsocketCommunicator`,
-`InMemoryChannelLayer`, a tiny test app with `auth.User`-like model + DRF serializer.
+`InMemoryChannelLayer`, a tiny test app (model + DRF serializer).
 
-| ID            | Scope        | What it asserts                                                        |
-|---------------|--------------|-----------------------------------------------------------------------|
-| T-IMPORT      | static       | No forbidden imports (`rx`,`six`,`promise`,`channels_api`); `__all__`. |
-| T-UNIT        | unit         | `_group_name`, `model_label`, enum generation, field-filter helper.   |
-| T-CONSUMER    | channels     | connect handshake; `notify`/`register`/`deregister` handlers.         |
-| T-RESOLVER    | unit/async   | `subscribe_*` performs group add/discard + control msg; one yield.    |
-| T-VIEW        | http         | `SubscriptionGraphQLView` returns the one-shot confirmation.          |
-| T-E2E         | integration  | open WS → subscribe via view → save/delete model → assert WS frame.   |
-| T-CONCURRENCY | integration  | two connections, different `data` sets, correct per-connection output.|
-| T-COMPAT      | regression   | deprecated forms still wire and warn.                                  |
-| T-BINDING     | unit         | signal dedup (`dispatch_uid`); single serialize per event.            |
+| ID            | Scope        | Asserts                                                          |
+|---------------|--------------|-----------------------------------------------------------------|
+| T-ISO         | packaging    | base import channels-free; guarded ImportError without extra.   |
+| T-IMPORT      | static       | no `rx`/`six`/`promise`/`channels_api`; `__all__`.              |
+| T-UNIT        | unit         | `_group_name`, `model_label`, enum generation, field filter.    |
+| T-CONSUMER    | channels     | connect handshake; notify/register/deregister handlers.         |
+| T-RESOLVER    | async        | `subscribe_*` group add/discard + control msg; single yield.    |
+| T-VIEW        | http         | one-shot confirmation from `SubscriptionGraphQLView`.           |
+| T-E2E         | integration  | open WS → subscribe → save/delete → assert WS frame.           |
+| T-CONCURRENCY | integration  | two connections, different `data`, correct per-connection output.|
+| T-COMPAT      | regression   | shim imports + deprecated forms warn & wire.                    |
+| T-BINDING     | unit         | signal dedup; single serialize per event.                       |
 
-Coverage gate: ≥ 90% on the package modules. Every AC in §11 maps to ≥ 1 test above.
-
----
-
-## 13. Packaging, CI & Versioning
-
-- **Packaging:** migrate `setup.py`/`setup.cfg` → `pyproject.toml` (PEP 621), `hatchling`
-  or `setuptools` backend; declare extras `[redis]` (channels-redis) and `[test]`.
-- **CI:** GitHub Actions matrix — Python {3.12, 3.13} × Django {4.0, 4.2, 5.2, 6.0}
-  (drop illegal combos), using `nox`/`tox`; run lint (`ruff`), type-light check, tests +
-  coverage. Add `ruff`/`black` formatting check.
-- **Versioning:** first modern release is **`0.1.0`** (signals a real break from the
-  `0.0.x` Channels-1 line while staying pre-1.0). README documents the support boundary.
+Each AC (§12) maps to ≥ 1 test. Coverage gate ≥ 90% on subscription modules.
 
 ---
 
-## 14. Risks & Open Questions
+## 15. Risks & Open Questions
 
-- **R1 — HTTP-resolved subscription is non-standard.** Preserved per decision, but it
-  requires a shared channel layer across HTTP+WS processes. Documented (§6.6). Mitigation:
-  ship clear settings guidance; default dev config uses InMemory.
-- **R2 — graphene-django `GraphQLView` internals** for `SubscriptionGraphQLView` may shift
-  across 3.x minors. Mitigation: target the documented `subscribe()` path of graphql-core,
+- **R1** HTTP-resolved subscribe needs a shared channel layer across HTTP+WS processes
+  (Redis in prod). Documented; dev default InMemory.
+- **R2** `SubscriptionGraphQLView` should target graphql-core's documented `subscribe()`,
   not private graphene-django internals; pin tested versions in CI.
-- **R3 — Field projection over the channel layer** sends full data on the wire. Acceptable
-  for typical model sizes; revisit with a producer-side cache if profiling shows pressure.
-- **OQ1 — `channel_id` token format:** use `self.channel_name` directly (simplest) vs. a
-  short opaque token mapped to it. Proposed: use `channel_name` directly. (Confirm in impl.)
-- **OQ2 — Minimum Django:** request says ≥4.0; 4.0 is EOL upstream. Keep 4.0 in the
-  declared floor but only CI-test 4.2+/5.x/6.0? Proposed: floor `>=4.2` in CI, allow 4.0
-  install. (Confirm.)
+- **R3** Field projection ships full data over the layer; fine for typical models, revisit
+  with a producer-side cache if profiling shows pressure.
+- **R4** Release coupling: a subscriptions fix now ships in an extras release. Accepted
+  (atomic compatibility for a single maintainer).
+- **OQ1** `channel_id` value: use `self.channel_name` directly (proposed) vs. an opaque
+  token mapped to it.
+- **OQ2** Django floor in CI: declare `>=4.0` but CI-test `4.2+` (4.0 is upstream-EOL)?
+  Proposed yes.
+- **OQ3** Session scope: the `graphene-django-extras` repo must be added to this session to
+  implement §8; only the shim repo is currently in scope.
 
 ---
 
-## 15. Definition of Done
+## 16. Definition of Done
 
-1. This SPEC approved.
-2. All §11 acceptance criteria implemented and green via §12 tests.
-3. CI matrix (§13) green.
-4. README + migration guide rewritten.
-5. No forbidden legacy imports remain.
-6. Changes committed and pushed to
-   `claude/graphql-subscriptions-channels-upgrade-xsY7w`.
+1. SPEC approved.
+2. extras `1.2.0`: `subscriptions/` package + `[subscriptions]` extra; all §12 ACs green via
+   §14 tests; base install proven channels-free.
+3. shim `graphene-django-subscriptions` `0.1.0`: re-exports + deprecation warnings; old
+   imports green.
+4. CI matrices green in both repos (incl. the base-install no-extra job).
+5. READMEs + migration guide rewritten; no forbidden legacy imports remain.
+6. Changes committed/pushed to the designated branches.
